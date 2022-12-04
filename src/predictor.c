@@ -47,11 +47,11 @@ uint32_t pc_mask;
 uint8_t *local_prediction_table_t;
 uint32_t lpt_mask;
 
-uint32_t *global_history_table_t;
+uint8_t *global_prediction_table_t;
 uint32_t global_mask_t;
 uint32_t global_history;
 
-uint32_t *choose;
+uint8_t *choose;
 
 //------------------------------------//
 //        Predictor Functions         //
@@ -73,17 +73,17 @@ init_predictor()
 
   global_history = 0;
 
-  choose = (uint32_t *)malloc(sizeof(uint32_t) * (1 << ghistoryBits)); // TAKE to select global one
+  choose = (uint8_t *)malloc(sizeof(uint8_t) * (1 << ghistoryBits)); // TAKE to select global one
   memset(choose, WT, 1 << ghistoryBits);
 
   local_history_table_t = (uint32_t *)malloc(sizeof(uint32_t) * (1 << pcIndexBits));
-  memset(local_history_table_t, 0,1 << pcIndexBits);
+  memset(local_history_table_t, 0, 1 << pcIndexBits * sizeof(uint32_t));
 
   local_prediction_table_t = (uint8_t *)malloc(sizeof(uint8_t) * (1 << lhistoryBits));
   memset(local_prediction_table_t, WN, 1 << lhistoryBits);
 
-  global_history_table_t = (uint32_t *)malloc(sizeof(uint32_t) * (1 << ghistoryBits));
-  memset(global_history_table_t, WN, 1 << ghistoryBits);
+  global_prediction_table_t = (uint8_t *)malloc(sizeof(uint32_t) * (1 << ghistoryBits));
+  memset(global_prediction_table_t, WN, 1 << ghistoryBits);
   // Tournament Initialize Done
 }
 
@@ -98,7 +98,7 @@ uint8_t tournament_predict(uint32_t pc) {
     local_prediction_table_t[local_history_table_t[pc & pc_mask] & lpt_mask] >= WT;
 
   uint8_t gprediction = 
-    global_history_table_t[global_history] >= WT;
+    global_prediction_table_t[global_history] >= WT;
     
   return (choose[global_history] >= WT) ? gprediction : lprediction;  
   // return gprediction;
@@ -141,13 +141,15 @@ void tournament_train(uint32_t pc, uint8_t outcome) {
   local_history_table_t[pc & pc_mask] = (lpidx << 1) | outcome;
 
 
-  uint8_t gprediction = global_history_table_t[global_history];
-  if (outcome == NOTTAKEN && gprediction != SN) global_history_table_t[global_history]--;
-  if (outcome == TAKEN && gprediction != ST) global_history_table_t[global_history]++;
+  uint8_t gprediction = global_prediction_table_t[global_history];
+  if (outcome == NOTTAKEN && gprediction != SN) global_prediction_table_t[global_history]--;
+  if (outcome == TAKEN && gprediction != ST) global_prediction_table_t[global_history]++;
 
   if (lprediction >> 1 != gprediction >> 1) {
+    // printf("choose before: %d ", choose[global_history]);
     if (outcome == lprediction >> 1 && choose[global_history] != SN) choose[global_history]--;
     if (outcome == gprediction >> 1 && choose[global_history] != ST) choose[global_history]++;
+    // printf("lpre: %d, gpre: %d, choose: %d\n", lprediction, gprediction, choose[global_history]);
   }
 
   global_history = (global_history << 1 | outcome) & global_mask_t;
