@@ -56,6 +56,7 @@ uint32_t global_history;
 
 uint8_t *choose;
 
+uint8_t *choose_tg;
 //------------------------------------//
 //        Predictor Functions         //
 //------------------------------------//
@@ -81,7 +82,7 @@ init_predictor()
       global_history = 0;
 
       choose = (uint8_t *)malloc(sizeof(uint8_t) * (1 << ghistoryBits)); // TAKE to select global one
-      memset(choose, WT, 1 << ghistoryBits);
+      memset(choose, SN, 1 << ghistoryBits);
 
       local_history_table_t = (uint32_t *)malloc(sizeof(uint32_t) * (1 << pcIndexBits));
       memset(local_history_table_t, 0, 1 << pcIndexBits * sizeof(uint32_t));
@@ -102,6 +103,33 @@ init_predictor()
       memset(gBHT, WN, 1 << ghistoryBits);
       break;
     case CUSTOM:
+       // Tournament Initialize
+      pc_mask = (1 << pcIndexBits) - 1;
+      lpt_mask = (1 << lhistoryBits) - 1;
+      global_mask_t = (1 << ghistoryBits) - 1;
+
+      global_history = 0;
+
+      choose_tg = (uint8_t *)malloc(sizeof(uint8_t) * (1 << ghistoryBits)); // TAKE to select global one
+      memset(choose_tg, WT, 1 << ghistoryBits);
+
+      choose = (uint8_t *)malloc(sizeof(uint8_t) * (1 << ghistoryBits)); // TAKE to select global one
+      memset(choose, SN, 1 << ghistoryBits);
+
+      local_history_table_t = (uint32_t *)malloc(sizeof(uint32_t) * (1 << pcIndexBits));
+      memset(local_history_table_t, 0, 1 << pcIndexBits * sizeof(uint32_t));
+
+      local_prediction_table_t = (uint8_t *)malloc(sizeof(uint8_t) * (1 << lhistoryBits));
+      memset(local_prediction_table_t, WN, 1 << lhistoryBits);
+
+      global_prediction_table_t = (uint8_t *)malloc(sizeof(uint32_t) * (1 << ghistoryBits));
+      memset(global_prediction_table_t, WN, 1 << ghistoryBits);
+
+      gBHT = (uint8_t *)malloc(sizeof(uint8_t) * (1 << ghistoryBits));
+      memset(gBHT, WN, 1 << ghistoryBits);
+
+      break;
+
     default:
       break;
   }
@@ -149,6 +177,9 @@ make_prediction(uint32_t pc)
     case TOURNAMENT:
       return tournament_predict(pc);
     case CUSTOM:
+      return (choose_tg[global_history]>=WT) ? tournament_predict(pc) : gshare_predict(pc);
+      // return tournament_predict(pc);
+      // return gshare_predict(pc);
     default:
       break;
   }
@@ -195,6 +226,47 @@ void tournament_train(uint32_t pc, uint8_t outcome) {
   global_history = (global_history << 1 | outcome) & global_mask_t;
 }
 
+void costume_train(uint32_t pc, uint8_t outcome) {
+  uint8_t tp = tournament_predict(pc);
+  uint8_t gp = gshare_predict(pc);
+  if (tp != gp) {
+    if (tp == outcome && choose_tg[global_history] != ST) {
+      choose_tg[global_history]++;
+    }
+    if (gp == outcome && choose_tg[global_history] != SN) {
+      choose_tg[global_history]--;
+    }
+  }
+
+  uint32_t gIndex = global_mask_t & (ghistory ^ pc);
+  if (outcome == TAKEN && gBHT[gIndex] != ST) {
+    gBHT[gIndex] ++;
+  }else if (outcome == NOTTAKEN && gBHT[gIndex] != SN) {
+    gBHT[gIndex] --;
+  }
+
+  uint32_t lpidx = local_history_table_t[pc & pc_mask] & lpt_mask;
+  uint8_t lprediction = local_prediction_table_t[lpidx];
+  if (outcome == NOTTAKEN && lprediction != SN) local_prediction_table_t[lpidx]--; 
+  if (outcome == TAKEN && lprediction != ST) local_prediction_table_t[lpidx]++; 
+  local_history_table_t[pc & pc_mask] = (lpidx << 1) | outcome;
+
+
+  uint8_t gprediction = global_prediction_table_t[global_history];
+  if (outcome == NOTTAKEN && gprediction != SN) global_prediction_table_t[global_history]--;
+  if (outcome == TAKEN && gprediction != ST) global_prediction_table_t[global_history]++;
+
+  if (lprediction >> 1 != gprediction >> 1) {
+    // printf("choose before: %d ", choose[global_history]);
+    if (outcome == lprediction >> 1 && choose[global_history] != SN) choose[global_history]--;
+    if (outcome == gprediction >> 1 && choose[global_history] != ST) choose[global_history]++;
+    // printf("lpre: %d, gpre: %d, choose: %d\n", lprediction, gprediction, choose[global_history]);
+  }
+
+  global_history = (global_history << 1 | outcome) & global_mask_t;
+
+}
+
 void
 train_predictor(uint32_t pc, uint8_t outcome)
 {
@@ -211,6 +283,7 @@ train_predictor(uint32_t pc, uint8_t outcome)
       tournament_train(pc, outcome);
       return;
     case CUSTOM:
+      costume_train(pc, outcome);
       return;
     default:
       break;
